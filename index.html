@@ -1,0 +1,253 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>虛擬鋼琴鍵盤</title>
+  <style>
+    :root{
+      --white-width:64px;
+      --white-height:260px;
+      --black-width:40px;
+      --black-height:160px;
+      --gap:2px;
+      font-family: system-ui, -apple-system, "Segoe UI", Roboto, "Noto Sans", "Helvetica Neue", Arial;
+    }
+    body{display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0;background:linear-gradient(180deg,#222 0%,#111 60%);color:#fff}
+    .wrap{background:rgba(255,255,255,0.04);padding:20px;border-radius:12px;box-shadow:0 8px 30px rgba(0,0,0,0.6);}
+    h1{font-size:18px;margin:0 0 12px 0;text-align:center}
+    .piano{position:relative;user-select:none}
+    .white-keys{display:flex;position:relative}
+    .key.white{width:var(--white-width);height:var(--white-height);background:#fff;border:1px solid #ccc;border-bottom:4px solid #bbb;box-sizing:border-box;position:relative;display:flex;align-items:flex-end;justify-content:center;padding-bottom:8px;color:#111;font-weight:600}
+    .key.white.active{background:#ffd;box-shadow:inset 0 0 0 3px rgba(255,200,0,0.08)}
+    .key.black{width:var(--black-width);height:var(--black-height);background:#000;color:#fff;position:absolute;margin-left:-var(--black-width)/2;z-index:2;border-radius:4px;display:flex;align-items:flex-end;justify-content:center;padding-bottom:8px;font-weight:700}
+    .key.black.active{background:#333;box-shadow:0 6px 12px rgba(0,0,0,0.6), inset 0 -6px 14px rgba(255,255,255,0.03)}
+    .label{font-size:12px;opacity:0.9}
+    .controls{display:flex;gap:10px;align-items:center;justify-content:center;margin-top:12px}
+    .btn{background:#fff;color:#111;padding:6px 10px;border-radius:8px;border:none;font-weight:700;cursor:pointer}
+    .hint{font-size:12px;opacity:0.8;text-align:center;margin-top:8px}
+    /* black key positions for an octave starting at C */
+    .black-1{left:calc(var(--white-width) - var(--black-width)/2 - var(--gap))} /* C# */
+    .black-2{left:calc(var(--white-width)*2 - var(--black-width)/2 - var(--gap))} /* D# */
+    .black-3{left:calc(var(--white-width)*4 - var(--black-width)/2 - var(--gap))} /* F# */
+    .black-4{left:calc(var(--white-width)*5 - var(--black-width)/2 - var(--gap))} /* G# */
+    .black-5{left:calc(var(--white-width)*6 - var(--black-width)/2 - var(--gap))} /* A# */
+    @media (max-width:740px){
+      :root{--white-width:44px;--white-height:180px;--black-width:28px;--black-height:110px}
+    }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <h1>虛擬鋼琴 — 點擊或用鍵盤演奏（支援觸控）</h1>
+    <div class="piano" id="piano">
+      <div class="white-keys" id="whiteKeys">
+        <!-- White keys: C D E F G A B C -->
+        <div class="key white" data-note="C4"><span class="label">C</span></div>
+        <div class="key white" data-note="D4"><span class="label">D</span></div>
+        <div class="key white" data-note="E4"><span class="label">E</span></div>
+        <div class="key white" data-note="F4"><span class="label">F</span></div>
+        <div class="key white" data-note="G4"><span class="label">G</span></div>
+        <div class="key white" data-note="A4"><span class="label">A</span></div>
+        <div class="key white" data-note="B4"><span class="label">B</span></div>
+        <div class="key white" data-note="C5"><span class="label">C5</span></div>
+      </div>
+      <!-- Black keys positioned absolutely over whites -->
+      <div class="key black black-1" data-note="C#4"><span class="label">C#</span></div>
+      <div class="key black black-2" data-note="D#4"><span class="label">D#</span></div>
+      <div class="key black black-3" data-note="F#4"><span class="label">F#</span></div>
+      <div class="key black black-4" data-note="G#4"><span class="label">G#</span></div>
+      <div class="key black black-5" data-note="A#4"><span class="label">A#</span></div>
+    </div>
+
+    <div class="controls">
+      <button class="btn" id="sustainToggle">Sustain: Off</button>
+      <button class="btn" id="muteToggle">Mute: Off</button>
+    </div>
+    <div class="hint">鍵盤對應：Z S X D C V G B H N J M , （由 C4 到 C5）</div>
+  </div>
+
+  <script>
+    // 音高表（12平均律，以 A4 = 440Hz）
+    const noteFreq = {
+      'C4': 261.6255653005986,
+      'C#4':277.1826309768721,
+      'D4':293.6647679174076,
+      'D#4':311.1269837220809,
+      'E4':329.6275569128699,
+      'F4':349.2282314330039,
+      'F#4':369.9944227116344,
+      'G4':391.9954359817493,
+      'G#4':415.3046975799451,
+      'A4':440.0,
+      'A#4':466.1637615180899,
+      'B4':493.8833012561241,
+      'C5':523.2511306011972
+    };
+
+    // 鍵盤對應 (由左到右)
+    const keyMap = {
+      'z':'C4','s':'C#4','x':'D4','d':'D#4','c':'E4','v':'F4','g':'F#4','b':'G4','h':'G#4','n':'A4','j':'A#4','m':'B4',',':'C5'
+    };
+
+    const AudioCtx = window.AudioContext || window.webkitAudioContext;
+    const ctx = new AudioCtx();
+    let sustain = false;
+    let muted = false;
+
+    // activeOscs stores currently playing oscillators for note -> {osc, gain}
+    const activeOscs = new Map();
+
+    function playNote(note){
+      if (muted) return;
+      if (activeOscs.has(note)) return; // already playing
+      const freq = noteFreq[note];
+      if (!freq) return;
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = 'sine';
+      osc.frequency.value = freq;
+      gain.gain.value = 0.0001;
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.start();
+      // quick attack
+      gain.gain.exponentialRampToValueAtTime(0.45, ctx.currentTime + 0.02);
+      activeOscs.set(note,{osc,gain});
+      highlightKey(note,true);
+    }
+
+    function stopNote(note){
+      const pair = activeOscs.get(note);
+      if (!pair) return;
+      if (sustain) return; // hold until sustain off
+      const {osc,gain} = pair;
+      // release
+      gain.gain.cancelScheduledValues(ctx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + 0.4);
+      setTimeout(()=>{
+        try{ osc.stop(); }catch(e){}
+        try{ osc.disconnect(); }catch(e){}
+      },500);
+      activeOscs.delete(note);
+      highlightKey(note,false);
+    }
+
+    function stopAllNotes(){
+      for (const note of Array.from(activeOscs.keys())){
+        const pair = activeOscs.get(note);
+        if (!pair) continue;
+        const {osc,gain} = pair;
+        gain.gain.cancelScheduledValues(ctx.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + 0.2);
+        setTimeout(()=>{ try{osc.stop();}catch(e){} },300);
+        activeOscs.delete(note);
+        highlightKey(note,false);
+      }
+    }
+
+    const pianoEl = document.getElementById('piano');
+    // map DOM keys to note names
+    const domKeys = Array.from(pianoEl.querySelectorAll('.key'));
+    function highlightKey(note, on){
+      const el = domKeys.find(k=>k.dataset.note===note);
+      if (!el) return;
+      el.classList.toggle('active', !!on);
+    }
+
+    // mouse / touch handlers
+    pianoEl.addEventListener('pointerdown', (e)=>{
+      const key = e.target.closest('.key');
+      if (!key) return;
+      // resume audio context on first interaction
+      if (ctx.state === 'suspended') ctx.resume();
+      const note = key.dataset.note;
+      playNote(note);
+      // capture pointer to receive pointerup outside
+      key.setPointerCapture(e.pointerId);
+    });
+
+    pianoEl.addEventListener('pointerup', (e)=>{
+      const key = e.target.closest('.key');
+      if (!key) return;
+      const note = key.dataset.note;
+      // release pointer
+      try{ key.releasePointerCapture(e.pointerId); }catch(e){}
+      stopNote(note);
+    });
+
+    pianoEl.addEventListener('pointerleave', (e)=>{
+      // when pointer leaves a key while pressed, stop the note
+      const key = e.target.closest('.key');
+      if (!key) return;
+      const note = key.dataset.note;
+      stopNote(note);
+    });
+
+    // keyboard handlers
+    const pressedKeys = new Set();
+    window.addEventListener('keydown', (e)=>{
+      const k = e.key.toLowerCase();
+      if (!keyMap[k]) return;
+      if (pressedKeys.has(k)) return; // avoid repeat
+      pressedKeys.add(k);
+      if (ctx.state === 'suspended') ctx.resume();
+      playNote(keyMap[k]);
+      e.preventDefault();
+    });
+    window.addEventListener('keyup', (e)=>{
+      const k = e.key.toLowerCase();
+      if (!keyMap[k]) return;
+      pressedKeys.delete(k);
+      stopNote(keyMap[k]);
+      e.preventDefault();
+    });
+
+    // sustain toggle
+    document.getElementById('sustainToggle').addEventListener('click', ()=>{
+      sustain = !sustain;
+      document.getElementById('sustainToggle').textContent = 'Sustain: ' + (sustain? 'On' : 'Off');
+      if (!sustain){ // release all that were held
+        // copy keys first
+        const notes = Array.from(activeOscs.keys());
+        for (const note of notes) stopNote(note);
+      }
+    });
+
+    // mute toggle
+    document.getElementById('muteToggle').addEventListener('click', ()=>{
+      muted = !muted;
+      document.getElementById('muteToggle').textContent = 'Mute: ' + (muted? 'On' : 'Off');
+      if (muted) stopAllNotes();
+    });
+
+    // when page visibility lost, stop sound
+    document.addEventListener('visibilitychange', ()=>{
+      if (document.hidden) stopAllNotes();
+    });
+
+    // helpful: click anywhere to resume audio on mobile if context suspended
+    document.body.addEventListener('touchstart', ()=>{
+      if (ctx.state === 'suspended') ctx.resume();
+    }, {passive:true});
+
+    // Accessibility: show focus outlines and allow Enter/Space to play when a key receives keyboard focus
+    domKeys.forEach(k=>{
+      k.tabIndex = 0;
+      k.addEventListener('keydown', (e)=>{
+        if (e.code === 'Space' || e.code === 'Enter'){
+          e.preventDefault();
+          playNote(k.dataset.note);
+        }
+      });
+      k.addEventListener('keyup', (e)=>{
+        if (e.code === 'Space' || e.code === 'Enter'){
+          e.preventDefault();
+          stopNote(k.dataset.note);
+        }
+      });
+    });
+
+  </script>
+</body>
+</html>
